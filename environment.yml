@@ -39,6 +39,7 @@ dependencies:
   - ipython_pygments_lexers=1.1.1
   - jedi=0.19.2
   - jinja2=3.1.6
+  - joblib=1.5.3
   - json5=0.12.1
   - jsonschema=4.25.1
   - jsonschema-specifications=2025.9.1
@@ -56,6 +57,9 @@ dependencies:
   - libffi=3.4.4
   - libgcc=15.2.0
   - libgcc-ng=15.2.0
+  - libgfortran=15.2.0
+  - libgfortran-ng=15.2.0
+  - libgfortran5=15.2.0
   - libgomp=15.2.0
   - libhwloc=2.12.1
   - libnsl=2.0.0
@@ -114,6 +118,8 @@ dependencies:
   - rfc3339-validator=0.1.4
   - rfc3986-validator=0.1.1
   - rpds-py=0.28.0
+  - scikit-learn=1.8.0
+  - scipy=1.16.3
   - send2trash=1.8.3
   - setuptools=80.9.0
   - six=1.17.0
@@ -124,6 +130,7 @@ dependencies:
   - tbb=2022.3.0
   - tbb-devel=2022.3.0
   - terminado=0.18.1
+  - threadpoolctl=3.5.0
   - tinycss2=1.4.0
   - tk=8.6.15
   - tornado=6.5.4
