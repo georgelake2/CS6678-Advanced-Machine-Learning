@@ -1,0 +1,571 @@
+# =============================================================================
+# WADI Fault Injection Catalog (Rigorous, conservative version)
+# Version: 2.0
+# Purpose: Synthetic fault injection for WADI sensor-fault vs cyber-attack study.
+# Scope: Primary injected faults are limited to sensor-measurement faults and
+#        telemetry/acquisition faults on measurement tags only.
+#
+# Evidence basis:
+#   - WADI architecture paper (Ahmed et al., CySWATER 2017)
+#   - WADI attack table provided by user
+#   - Existing dataset tag inventory supplied by user in prior catalog
+#
+# Modeling stance:
+#   1. No primary injection on controller outputs, actuator commands, setpoints,
+#      pump-speed commands, or cumulative counters.
+#   2. No correlation-based co-injection.
+#   3. A single root fault is injected first; any other changes must arise from
+#      closed-loop control response or physical propagation.
+#   4. Analyzer faults are local by default. Do not corrupt sibling analyzers
+#      unless modeling a process upset rather than a sensor fault.
+#   5. Historian/SCADA manifestation of telemetry faults should prefer
+#      hold-last-value, stale updates, bad-quality flags, or sparse missingness,
+#      not clean synthetic NaN blocks by default.
+# =============================================================================
+
+metadata:
+  version: "2.0"
+  dataset: "WADI"
+  source_documents:
+    - "WADI architecture paper (CySWATER 2017)"
+    - "WADI attack table"
+  rationale: >
+    WADI is a water distribution testbed with three process stages: primary grid,
+    secondary grid, and return water grid. Tanks, flow meters, pressure sensors,
+    and water-quality analyzers are central to monitoring and control. Attack
+    descriptions show that spoofed level, flow, pressure, and quality readings
+    can trigger control actions and delayed downstream effects. This catalog is
+    therefore intentionally causal and state-conditioned.
+  rigor_notes:
+    - "Conservative: if process coupling is not directly supported, do not auto-propagate."
+    - "Primary faults are limited to measurement tags; derived/control tags are consequence-only."
+    - "Use normal-only data to fit local surrogate dynamics before propagation."
+
+fault_domains:
+  sensing_element_fault:
+    description: "Physical or electronic degradation at the sensing element or transducer."
+  telemetry_acquisition_fault:
+    description: "Signal transport/acquisition problem between field device and PLC/SCADA/historian."
+
+historian_manifestation_defaults:
+  telemetry_fault_preference_order:
+    - hold_last_value
+    - stale_updates_with_irregular_timestamp_gaps
+    - bad_quality_flag_if_available
+    - sparse_missing_samples
+  note: >
+    Use long pure-NaN blocks only if the actual WADI logging pipeline demonstrably
+    records outages that way. Otherwise, prefer stale-value or sparse-missing patterns.
+
+# =============================================================================
+# ROOT TAG POLICY
+# =============================================================================
+primary_injection_policy:
+  allow_primary_roots:
+    - LT
+    - FIT
+    - FIC_PV
+    - PIT
+    - DPIT
+    - AIT
+    - PIC_PV
+  forbid_primary_roots:
+    - "*_CO"
+    - "*_SP"
+    - "*_SPEED"
+    - FQ
+    - FLOW_CALC
+  consequence_only_tags:
+    - 2_PIC_003_CO
+    - 2_P_003_SPEED
+    - 2_P_004_SPEED
+    - 2_FIC_101_CO
+    - 2_FIC_201_CO
+    - 2_FIC_301_CO
+    - 2_FIC_401_CO
+    - 2_FIC_501_CO
+    - 2_FIC_601_CO
+    - 2_MCV_101_CO
+    - 2_MCV_201_CO
+    - 2_MCV_301_CO
+    - 2_MCV_401_CO
+    - 2_MCV_501_CO
+    - 2_MCV_601_CO
+    - 2_MCV_007_CO
+    - 2_FIC_101_SP
+    - 2_FIC_201_SP
+    - 2_FIC_401_SP
+    - 2_FIC_501_SP
+    - 2_FIC_601_SP
+    - 2_FQ_101_PV
+    - 2_FQ_201_PV
+    - 2_FQ_301_PV
+    - 2_FQ_401_PV
+    - 2_FQ_501_PV
+    - 2_FQ_601_PV
+    - TOTAL_CONS_REQUIRED_FLOW
+
+# =============================================================================
+# FAULT MODE LIBRARY
+# =============================================================================
+fault_mode_library:
+  sensing_element_faults:
+    bias_step:
+      description: "Abrupt additive offset from true value."
+      realism_notes:
+        - "Magnitude tied to IQR of normal operation; 1.0-3.0x IQR ensures offset exceeds natural spread."
+    monotonic_drift:
+      description: "Slow bounded random-walk drift; not perfectly linear."
+      realism_notes:
+        - "Total drift over window = 0.5-2.0x IQR."
+    frozen_last_value:
+      description: "Sensor output holds the last valid sample while process continues evolving."
+      realism_notes:
+        - "Freeze at series.iloc[0] — the value at fault onset, not an arbitrary percentile."
+    increased_noise:
+      description: "Variance inflation around the true process signal."
+    lag_sluggishness:
+      description: "First-order lag or delayed response to changing process values."
+
+  telemetry_acquisition_faults:
+    hold_last_value:
+      description: "Updates stop; last value repeats."
+    sparse_dropout:
+      description: "Intermittent missing samples at low rate (5-25%)."
+    burst_dropout:
+      description: "Short contiguous outage (20-60% of window) followed by recovery."
+
+# =============================================================================
+# PROCESS TOPOLOGY
+# =============================================================================
+process_topology:
+  stages:
+    P1:
+      name: "Primary grid"
+      monitored_tags:
+        - 1_LT_001_PV
+        - 1_FIT_001_PV
+        - 1_AIT_001_PV
+        - 1_AIT_002_PV
+        - 1_AIT_003_PV
+        - 1_AIT_004_PV
+        - 1_AIT_005_PV
+      downstream_stages: [P2A]
+
+    P2A:
+      name: "Secondary grid - elevated reservoirs and distribution nodes"
+      monitored_tags:
+        - 2_LT_001_PV
+        - 2_LT_002_PV
+        - 2_FIT_001_PV
+        - 2_PIT_001_PV
+        - 2_FIT_002_PV
+        - 2_PIT_002_PV
+        - 2_FIT_003_PV
+        - 2_PIT_003_PV
+        - 2_DPIT_001_PV
+        - 2_PIC_003_PV
+        - 2A_AIT_001_PV
+        - 2A_AIT_002_PV
+        - 2A_AIT_003_PV
+        - 2A_AIT_004_PV
+        - 2B_AIT_001_PV
+        - 2B_AIT_002_PV
+        - 2B_AIT_003_PV
+        - 2B_AIT_004_PV
+      downstream_stages: [P2B]
+
+    P2B:
+      name: "Secondary grid - consumer branches"
+      monitored_tags:
+        - 2_FIC_101_PV
+        - 2_FIC_201_PV
+        - 2_FIC_301_PV
+        - 2_FIC_401_PV
+        - 2_FIC_501_PV
+        - 2_FIC_601_PV
+      downstream_stages: [P3]
+
+    P3:
+      name: "Return water grid"
+      monitored_tags:
+        - 3_LT_001_PV
+        - 3_FIT_001_PV
+        - 3_AIT_001_PV
+        - 3_AIT_002_PV
+        - 3_AIT_003_PV
+        - 3_AIT_004_PV
+        - 3_AIT_005_PV
+      downstream_stages: []
+
+# =============================================================================
+# DOCUMENTED/DEFENSIBLE PROPAGATION EDGES
+# profile: closed_loop_response  — controller reacts, downstream process changes
+# profile: measurement_only      — only the root tag is altered; no propagation
+# =============================================================================
+allowed_propagation_edges:
+  - from: 1_LT_001_PV
+    to:
+      - 1_FIT_001_PV
+      - 2_LT_001_PV
+      - 2_LT_002_PV
+    profile: closed_loop_response
+    evidence: "Attack 1/10 — P1 level spoof causes PLC to throttle P1->P2A pump, draining both elevated reservoirs."
+    lag_class: medium_to_long
+
+  - from: 1_FIT_001_PV
+    to:
+      - 1_AIT_001_PV
+      - 1_AIT_002_PV
+      - 1_AIT_003_PV
+      - 1_AIT_004_PV
+      - 1_AIT_005_PV
+    profile: closed_loop_response
+    evidence: "False 1_FIT_001 reading can alter chemical dosing while tank level stays plausible, changing quality."
+    lag_class: short_to_medium
+
+  - from: 2_LT_001_PV
+    to:
+      - 2_FIT_001_PV
+      - 2_PIT_001_PV
+      - 2_FIC_101_PV
+      - 2_FIC_201_PV
+    profile: closed_loop_response
+    evidence: "Architecture: elevated reservoir 1 supplies node 001 and branches 101/201; low level reduces head."
+    lag_class: medium
+
+  - from: 2_LT_002_PV
+    to:
+      - 2_FIT_002_PV
+      - 2_PIT_002_PV
+      - 2_FIC_301_PV
+      - 2_FIC_401_PV
+      - 2_FIT_003_PV
+      - 2_PIT_003_PV
+      - 2_FIC_501_PV
+      - 2_FIC_601_PV
+    profile: closed_loop_response
+    evidence: "Attack table: draining 2_LT_002 causes downstream delivery impact across nodes/branches."
+    lag_class: medium
+
+  - from: 2_PIT_002_PV
+    to:
+      - 2_FIT_002_PV
+    profile: measurement_only
+    evidence: "Hydraulic node 002: pressure and flow are co-determined."
+    lag_class: short
+
+  - from: 2_PIT_003_PV
+    to:
+      - 2_FIT_003_PV
+      - 2_FIC_501_PV
+      - 2_FIC_601_PV
+    profile: closed_loop_response
+    evidence: "Booster pressure fault changes delivery to branches 501/601. Attack 13 confirms coupling."
+    lag_class: short_to_medium
+
+  - from: 3_LT_001_PV
+    to:
+      - 3_FIT_001_PV
+    profile: closed_loop_response
+    evidence: "Return-water tank level and return flow are topologically coupled."
+    lag_class: medium
+
+  # FIC_PV sensors: flow controller process variables. A faulty PV causes the
+  # controller to drive its output (CO/MCV) to compensate, changing actual branch
+  # flow and therefore draining the upstream reservoir faster or slower.
+  # Branches 101+201 draw from reservoir 1 (2_LT_001); branches 301-601 from reservoir 2 (2_LT_002).
+  - from: 2_FIC_101_PV
+    to: [2_LT_001_PV]
+    profile: closed_loop_response
+    evidence: "Branch 101 draws from reservoir 1; faulty PV drives controller to change actual flow, affecting reservoir level."
+    lag_class: medium
+
+  - from: 2_FIC_201_PV
+    to: [2_LT_001_PV]
+    profile: closed_loop_response
+    evidence: "Branch 201 draws from reservoir 1; same coupling as 2_FIC_101_PV."
+    lag_class: medium
+
+  - from: 2_FIC_301_PV
+    to: [2_LT_002_PV]
+    profile: closed_loop_response
+    evidence: "Branch 301 draws from reservoir 2; faulty PV changes actual flow, affecting 2_LT_002."
+    lag_class: medium
+
+  - from: 2_FIC_401_PV
+    to: [2_LT_002_PV]
+    profile: closed_loop_response
+    evidence: "Branch 401 draws from reservoir 2; same coupling as 2_FIC_301_PV."
+    lag_class: medium
+
+  - from: 2_FIC_501_PV
+    to: [2_LT_002_PV]
+    profile: closed_loop_response
+    evidence: "Branch 501 draws from reservoir 2; same coupling as 2_FIC_301_PV."
+    lag_class: medium
+
+  - from: 2_FIC_601_PV
+    to: [2_LT_002_PV]
+    profile: closed_loop_response
+    evidence: "Branch 601 draws from reservoir 2; same coupling as 2_FIC_301_PV."
+    lag_class: medium
+
+# =============================================================================
+# SENSOR DEFINITIONS
+# inject: false — near-zero variance; signal undetectable after feature scaling
+# =============================================================================
+sensors:
+  1_LT_001_PV:
+    type: LT
+    stage: P1
+    default_profile: closed_loop_response
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  1_FIT_001_PV:
+    type: FIT
+    stage: P1
+    default_profile: closed_loop_response
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  1_AIT_001_PV:
+    type: AIT
+    stage: P1
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  1_AIT_002_PV:
+    type: AIT
+    stage: P1
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  1_AIT_003_PV:
+    type: AIT
+    stage: P1
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  1_AIT_004_PV:
+    type: AIT
+    stage: P1
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  1_AIT_005_PV:
+    type: AIT
+    stage: P1
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2_LT_001_PV:
+    type: LT
+    stage: P2A
+    default_profile: closed_loop_response
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2_LT_002_PV:
+    type: LT
+    stage: P2A
+    default_profile: closed_loop_response
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2_FIT_001_PV:
+    type: FIT
+    stage: P2A
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2_PIT_001_PV:
+    type: PIT
+    stage: P2A
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2_FIT_002_PV:
+    type: FIT
+    stage: P2A
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2_PIT_002_PV:
+    type: PIT
+    stage: P2A
+    default_profile: closed_loop_response
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2_FIT_003_PV:
+    type: FIT
+    stage: P2A
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2_PIT_003_PV:
+    type: PIT
+    stage: P2A
+    default_profile: closed_loop_response
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2_DPIT_001_PV:
+    type: DPIT
+    stage: P2A
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2_PIC_003_PV:
+    type: PIC_PV
+    stage: P2A
+    default_profile: closed_loop_response
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2A_AIT_001_PV:
+    type: AIT
+    stage: P2A
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2A_AIT_002_PV:
+    type: AIT
+    stage: P2A
+    inject: false
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2A_AIT_003_PV:
+    type: AIT
+    stage: P2A
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2A_AIT_004_PV:
+    type: AIT
+    stage: P2A
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2B_AIT_001_PV:
+    type: AIT
+    stage: P2A
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2B_AIT_002_PV:
+    type: AIT
+    stage: P2A
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2B_AIT_003_PV:
+    type: AIT
+    stage: P2A
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2B_AIT_004_PV:
+    type: AIT
+    stage: P2A
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2_FIC_101_PV:
+    type: FIC_PV
+    stage: P2B
+    default_profile: closed_loop_response
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2_FIC_201_PV:
+    type: FIC_PV
+    stage: P2B
+    default_profile: closed_loop_response
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2_FIC_301_PV:
+    type: FIC_PV
+    stage: P2B
+    default_profile: closed_loop_response
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2_FIC_401_PV:
+    type: FIC_PV
+    stage: P2B
+    default_profile: closed_loop_response
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2_FIC_501_PV:
+    type: FIC_PV
+    stage: P2B
+    default_profile: closed_loop_response
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  2_FIC_601_PV:
+    type: FIC_PV
+    stage: P2B
+    default_profile: closed_loop_response
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  3_LT_001_PV:
+    type: LT
+    stage: P3
+    default_profile: closed_loop_response
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  3_FIT_001_PV:
+    type: FIT
+    stage: P3
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  3_AIT_001_PV:
+    type: AIT
+    stage: P3
+    inject: false
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  3_AIT_002_PV:
+    type: AIT
+    stage: P3
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  3_AIT_003_PV:
+    type: AIT
+    stage: P3
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  3_AIT_004_PV:
+    type: AIT
+    stage: P3
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+  3_AIT_005_PV:
+    type: AIT
+    stage: P3
+    default_profile: measurement_only
+    allowed_fault_modes: [bias_step, monotonic_drift, frozen_last_value, increased_noise, hold_last_value, sparse_dropout, burst_dropout]
+
+# =============================================================================
+# RUNTIME INJECTION CONTRACT
+# =============================================================================
+runtime_contract:
+  step_1_select_root:
+    - "Select exactly one primary root tag whose type is in allow_primary_roots."
+    - "Reject any tag in consequence_only_tags or matching forbid_primary_roots patterns."
+  step_2_inject_root:
+    - "Inject the root fault using calibrated magnitudes (IQR-based, not fixed global params)."
+  step_3_propagate_if_clr:
+    - "Only if root's default_profile is closed_loop_response AND an edge exists:"
+    - "  Apply downstream perturbation = coeff * root_perturbation, delayed by fitted lag."
+    - "  coeff and lag are fitted from normal training data via cross-correlation."
+    - "  measurement_only roots: no propagation."
+  step_4_validate:
+    - "No negative flows, impossible pressures, or non-monotone cumulative totals."
+
+reviewer_risk_flags:
+  - "Injecting CO/SP/SPEED/FQ tags as primary fault roots."
+  - "Correlation-based co-injection instead of causal propagation."
+  - "Freezing sensors at arbitrary percentiles instead of last-valid value."
+  - "Long clean NaN blocks without evidence WADI logs outages that way."
+  - "Directly corrupting sibling analyzers for a single analyzer fault."

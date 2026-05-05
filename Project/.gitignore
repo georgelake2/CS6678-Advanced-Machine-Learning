@@ -1,0 +1,25 @@
+# Paper (not included in this repo)
+paper/
+
+# Working/scratch directories
+working/
+Project Updates/
+
+# Generated data — regenerate by running NB1 → NB2 → NB3 → NB4 in sequence
+data/*.parquet
+data/*.joblib
+data/*.csv
+data/models/
+
+# Raw dataset folders (large, not for repo)
+WaDi.A1_9 Oct 2017/
+WaDi.A2_19 Nov 2019/
+Dataset Downloads/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.pyc
